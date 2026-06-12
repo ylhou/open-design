@@ -1,5 +1,10 @@
-ARG NODE_IMAGE=docker.io/library/node:24-alpine
-ARG RUNTIME_IMAGE=docker.io/library/node:24-alpine
+# glibc base (Debian slim) — required so the container can run the
+# opencode CLI (it ships glibc binaries) and so better-sqlite3 native
+# modules are compiled against the same libc the runtime stage uses.
+# Build and runtime MUST share the same libc: a musl-built better-sqlite3
+# will not load on a glibc runtime.
+ARG NODE_IMAGE=docker.io/library/node:24-slim
+ARG RUNTIME_IMAGE=docker.io/library/node:24-slim
 
 FROM ${NODE_IMAGE} AS build
 
@@ -18,7 +23,9 @@ ENV no_proxy=${no_proxy}
 ENV NO_PROXY=${NO_PROXY}
 ENV CI=true
 
-RUN apk add --no-cache python3 make g++
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -80,9 +87,19 @@ COPY plugins/_official ./plugins/_official
 
 FROM ${RUNTIME_IMAGE}
 
-RUN apk add --no-cache tini poppler-utils && \
-    addgroup -S -g 1001 open-design && \
-    adduser -S -D -H -u 1001 -G open-design open-design
+# OpenCode is installed globally (/usr/local/bin) so the in-container
+# daemon can spawn it as a local CLI — the host's /usr/bin/opencode is in
+# a different filesystem namespace and unreachable. Pin OPENCODE_VERSION
+# for reproducible builds. The daemon resolves `opencode` on PATH (see
+# apps/daemon/src/runtimes/defs/opencode.ts fallbackBins).
+ARG OPENCODE_VERSION=latest
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tini poppler-utils ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g opencode-ai@${OPENCODE_VERSION} && \
+    npm cache clean --force && \
+    groupadd -g 1001 open-design && \
+    useradd -r -u 1001 -g open-design -M -d /tmp open-design
 
 WORKDIR /app
 COPY --from=build --chown=open-design:open-design /app/deploy/daemon ./apps/daemon
@@ -107,9 +124,13 @@ ENV NODE_ENV=production
 ENV NODE_OPTIONS=--max-old-space-size=192
 ENV OD_BIND_HOST=0.0.0.0
 ENV OD_PORT=7456
+# opencode writes its config/cache under $HOME; the root FS is read_only,
+# so point HOME at the tmpfs-backed /tmp (writable, ephemeral). Provider
+# auth comes from API-key env vars set in docker-compose.yml.
+ENV HOME=/tmp
 
 EXPOSE 7456
 
 USER open-design
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "apps/daemon/dist/cli.js", "--no-open"]
