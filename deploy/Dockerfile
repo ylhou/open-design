@@ -32,7 +32,12 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
 COPY packages ./packages
 COPY tools ./tools
-COPY apps/daemon/package.json ./apps/daemon/package.json
+# apps/daemon source must be present before `pnpm install`: the root
+# postinstall (scripts/postinstall.mjs) builds apps/daemon via `tsc`,
+# which needs its tsconfig.json + src — not just package.json. apps/web is
+# built later in an explicit step, so its package.json alone is enough for
+# workspace resolution here.
+COPY apps/daemon ./apps/daemon
 COPY apps/web/package.json ./apps/web/package.json
 COPY e2e/package.json ./e2e/package.json
 RUN corepack enable && \
