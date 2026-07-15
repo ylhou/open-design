@@ -1,0 +1,8 @@
+# Optional overlay for artifacts compiled with the offline-builder image.
+# Use together with docker-compose.yml; the default runtime image remains
+# immutable and does not include this host-source override.
+services:
+  open-design:
+    volumes:
+      - ./daemon:/app/apps/daemon:ro
+      - ../apps/web/out:/app/apps/web/out:ro

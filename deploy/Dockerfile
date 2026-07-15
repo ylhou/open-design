@@ -45,6 +45,21 @@ RUN corepack enable && \
     pnpm install --frozen-lockfile
 
 COPY apps ./apps
+
+# This target is intentionally separate from the production runtime image. It
+# preserves the complete workspace, development dependencies, pnpm store, and
+# native build toolchain installed above. CI exports it as an OCI/Docker image
+# archive for air-gapped servers that need to rebuild source-only changes.
+#
+# Do not use it to run the service: it is large and runs as root by default.
+# The production image below stays minimal and runtime-only.
+FROM build AS offline-builder
+
+WORKDIR /app
+CMD ["bash"]
+
+FROM build AS production-build
+
 RUN pnpm --filter @open-design/daemon build && \
     pnpm --filter @open-design/web build && \
     pnpm --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
@@ -107,20 +122,20 @@ RUN apt-get update && \
     useradd -r -u 1001 -g open-design -M -d /tmp open-design
 
 WORKDIR /app
-COPY --from=build --chown=open-design:open-design /app/deploy/daemon ./apps/daemon
-COPY --from=build --chown=open-design:open-design /app/apps/web/out ./apps/web/out
-COPY --from=build --chown=open-design:open-design /app/skills ./skills
-COPY --from=build --chown=open-design:open-design /app/design-systems ./design-systems
-COPY --from=build --chown=open-design:open-design /app/craft ./craft
-COPY --from=build --chown=open-design:open-design /app/prompt-templates ./prompt-templates
-COPY --from=build --chown=open-design:open-design /app/assets/frames ./assets/frames
-COPY --from=build --chown=open-design:open-design /app/assets/community-pets ./assets/community-pets
+COPY --from=production-build --chown=open-design:open-design /app/deploy/daemon ./apps/daemon
+COPY --from=production-build --chown=open-design:open-design /app/apps/web/out ./apps/web/out
+COPY --from=production-build --chown=open-design:open-design /app/skills ./skills
+COPY --from=production-build --chown=open-design:open-design /app/design-systems ./design-systems
+COPY --from=production-build --chown=open-design:open-design /app/craft ./craft
+COPY --from=production-build --chown=open-design:open-design /app/prompt-templates ./prompt-templates
+COPY --from=production-build --chown=open-design:open-design /app/assets/frames ./assets/frames
+COPY --from=production-build --chown=open-design:open-design /app/assets/community-pets ./assets/community-pets
 # Plan §3.J4 / spec §23.3.5 — bundled atom plugins registered on
 # daemon boot. The directory contains `plugins/_official/atoms/<atom>/`
 # pairs (SKILL.md + open-design.json); registerBundledPlugins() walks
 # it on startup so the container ships with first-party atoms reachable
 # via the same registry path third-party plugins use.
-COPY --from=build --chown=open-design:open-design /app/plugins/_official ./plugins/_official
+COPY --from=production-build --chown=open-design:open-design /app/plugins/_official ./plugins/_official
 
 RUN mkdir -p /app/.od && \
     chown -R open-design:open-design /app

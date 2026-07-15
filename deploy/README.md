@@ -1,6 +1,6 @@
 # Docker deployment
 
-This deployment ships Open Design as a single Alpine-based runtime image. The
+This deployment ships Open Design as a single Debian-slim-based runtime image. The
 daemon serves both the API and the built Next.js static export, so there is no
 separate nginx container.
 
@@ -54,6 +54,64 @@ Pin a specific published image with a digest instead of the mutable `latest` tag
 ```bash
 OPEN_DESIGN_IMAGE=docker.io/vanjayak/open-design@sha256:<digest> docker compose up -d --no-build
 ```
+
+## Offline rebuilds
+
+The production image is intentionally runtime-only. It contains the deployed
+daemon's production `node_modules`, but not the workspace source, TypeScript,
+pnpm store, or a writable filesystem. It cannot compile code after startup.
+
+The GitHub Actions `Docker image` workflow exports a separate
+`open-design-offline-builder-linux-amd64-<sha>` artifact. Download that artifact
+from a connected machine, transfer the `.tar` file to the offline server, then
+load it there:
+
+```bash
+docker load -i open-design-offline-builder-linux-amd64.tar
+```
+
+For source-only changes (no changes to `package.json` or `pnpm-lock.yaml`), mount
+the changed workspace directories over the builder image. The image retains the
+matching pnpm store and complete development dependency graph. The offline
+install recreates package-local `node_modules` hidden by those bind mounts; it
+fails rather than reaching the package registry if anything is missing:
+
+```bash
+docker run --rm \
+  -v "$PWD/apps:/app/apps" \
+  -v "$PWD/packages:/app/packages" \
+  -v "$PWD/tools:/app/tools" \
+  -v "$PWD/deploy:/app/deploy" \
+  ghcr.io/<owner>/od:offline-builder-<commit-sha> \
+  sh -lc 'pnpm --offline install --frozen-lockfile && \
+    pnpm --offline --filter @open-design/daemon... run build && \
+    pnpm --offline --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
+    pnpm --offline --filter @open-design/web build'
+```
+
+The resulting artifacts are written to the mounted host paths:
+
+- `deploy/daemon/`
+- `apps/web/out/`
+
+To run those artifacts with the normal runtime image, apply the optional
+Compose overlay and recreate the service:
+
+```bash
+docker compose \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.offline-build.yml \
+  up -d --force-recreate
+```
+
+The overlay mounts only the compiled daemon and static web export as read-only
+paths. Remove its second `-f` argument to return to the artifacts bundled in
+the published runtime image.
+
+Use a builder archive generated from the same commit as the unchanged lockfile.
+If a dependency declaration or lockfile changes, rebuild the offline-builder
+image on a connected runner and transfer its new archive; do not attempt an
+offline dependency install with the old image.
 The image intentionally does not bundle Claude/Codex/Gemini CLI binaries. Keep
 those outside the image, or build a separate private runtime layer if a server
 deployment needs local code-agent CLIs installed in the container.

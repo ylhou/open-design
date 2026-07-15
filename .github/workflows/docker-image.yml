@@ -2,6 +2,9 @@ name: Docker image
 
 # Builds the deploy image on GitHub's runners (so low-memory servers never
 # have to compile the Next.js web build locally) and pushes it to ghcr.io.
+# It also exports an offline-builder archive. The latter is deliberately a
+# separate image: it contains the full workspace, compiler dependencies and
+# pnpm store needed to rebuild source-only changes on an air-gapped server.
 #
 # Triggers:
 #   - push to main      → ghcr.io/<owner>/od:edge + :sha-<short>
@@ -69,3 +72,22 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Export offline builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: offline-builder
+          platforms: linux/amd64
+          tags: ghcr.io/${{ github.repository_owner }}/od:offline-builder-${{ github.sha }}
+          outputs: type=docker,dest=/tmp/open-design-offline-builder-linux-amd64.tar
+          cache-from: type=gha
+
+      - name: Upload offline builder archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-design-offline-builder-linux-amd64-${{ github.sha }}
+          path: /tmp/open-design-offline-builder-linux-amd64.tar
+          if-no-files-found: error
+          retention-days: 14
