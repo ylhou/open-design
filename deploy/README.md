@@ -84,15 +84,13 @@ docker run --rm \
   -v "$PWD/tools:/app/tools" \
   -v "$PWD/deploy:/app/deploy" \
   ghcr.io/<owner>/od:offline-builder-<commit-sha> \
-  sh -lc 'pnpm --offline install --frozen-lockfile && \
-    pnpm --filter @open-design/daemon... run build && \
-    pnpm --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
-    pnpm --filter @open-design/web build'
+  offline-rebuild
 ```
 
-`offline-builder` sets `npm_config_offline=true`. This also applies to the
-internal install performed by `pnpm deploy`, which has no consistently accepted
-`--offline` command-line flag across pnpm releases.
+`offline-rebuild` never runs `pnpm deploy` on the offline server. It restores a
+production deployment template generated while GitHub Actions had network
+access, then replaces the freshly compiled daemon and workspace-package `dist`
+files. This avoids legacy deploy's registry metadata lookups.
 
 The resulting artifacts are written to the mounted host paths:
 

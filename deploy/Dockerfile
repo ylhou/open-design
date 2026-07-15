@@ -59,14 +59,14 @@ COPY apps ./apps
 # workspace while GitHub Actions still has network access: a later offline
 # `pnpm install` may otherwise discover a workspace-only package (for example
 # Electron) whose tarball and postinstall cache are absent from the store.
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile && \
+    pnpm --filter @open-design/daemon build && \
+    pnpm --filter @open-design/daemon deploy --legacy --prod /opt/open-design-offline-template/daemon
+
+COPY deploy/scripts/offline-rebuild.sh /usr/local/bin/offline-rebuild
+RUN chmod 755 /usr/local/bin/offline-rebuild
 
 WORKDIR /app
-# `pnpm deploy` performs an internal production install. Unlike `pnpm install`,
-# its CLI does not expose a usable --offline switch on every pnpm release, so
-# set the configuration through the standard npm environment variable. This is
-# inherited only by the offline-builder target, never by the online CI build.
-ENV npm_config_offline=true
 CMD ["bash"]
 
 FROM build AS production-build
