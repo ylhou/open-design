@@ -44,8 +44,6 @@ RUN corepack enable && \
     corepack prepare pnpm@10.33.2 --activate && \
     pnpm install --frozen-lockfile
 
-COPY apps ./apps
-
 # This target is intentionally separate from the production runtime image. It
 # preserves the complete workspace, development dependencies, pnpm store, and
 # native build toolchain installed above. CI exports it as an OCI/Docker image
@@ -55,10 +53,25 @@ COPY apps ./apps
 # The production image below stays minimal and runtime-only.
 FROM build AS offline-builder
 
+COPY apps ./apps
+# The base stage intentionally installs only the packages needed for the
+# production image cache. The offline builder must install the complete
+# workspace while GitHub Actions still has network access: a later offline
+# `pnpm install` may otherwise discover a workspace-only package (for example
+# Electron) whose tarball and postinstall cache are absent from the store.
+RUN pnpm install --frozen-lockfile
+
 WORKDIR /app
+# `pnpm deploy` performs an internal production install. Unlike `pnpm install`,
+# its CLI does not expose a usable --offline switch on every pnpm release, so
+# set the configuration through the standard npm environment variable. This is
+# inherited only by the offline-builder target, never by the online CI build.
+ENV npm_config_offline=true
 CMD ["bash"]
 
 FROM build AS production-build
+
+COPY apps ./apps
 
 RUN pnpm --filter @open-design/daemon build && \
     pnpm --filter @open-design/web build && \

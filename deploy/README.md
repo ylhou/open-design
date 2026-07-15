@@ -71,8 +71,9 @@ docker load -i open-design-offline-builder-linux-amd64.tar
 ```
 
 For source-only changes (no changes to `package.json` or `pnpm-lock.yaml`), mount
-the changed workspace directories over the builder image. The image retains the
-matching pnpm store and complete development dependency graph. The offline
+the changed workspace directories over the builder image. GitHub Actions
+installs the complete workspace into this image while it has network access,
+including workspace-only packages and their postinstall caches. The offline
 install recreates package-local `node_modules` hidden by those bind mounts; it
 fails rather than reaching the package registry if anything is missing:
 
@@ -84,10 +85,14 @@ docker run --rm \
   -v "$PWD/deploy:/app/deploy" \
   ghcr.io/<owner>/od:offline-builder-<commit-sha> \
   sh -lc 'pnpm --offline install --frozen-lockfile && \
-    pnpm --offline --filter @open-design/daemon... run build && \
-    pnpm --offline --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
-    pnpm --offline --filter @open-design/web build'
+    pnpm --filter @open-design/daemon... run build && \
+    pnpm --filter @open-design/daemon deploy --legacy --prod /app/deploy/daemon && \
+    pnpm --filter @open-design/web build'
 ```
+
+`offline-builder` sets `npm_config_offline=true`. This also applies to the
+internal install performed by `pnpm deploy`, which has no consistently accepted
+`--offline` command-line flag across pnpm releases.
 
 The resulting artifacts are written to the mounted host paths:
 
